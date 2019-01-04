@@ -271,20 +271,34 @@ public class PutHandler implements Handler {
 
 		if (r == null) {
 			log.info("Could not find child: " + path.getName() + " in parent: " + parent.getName() + " - " + parent.getClass());
-			if (parent instanceof MakeCollectionableResource) {
-				MakeCollectionableResource mkcol = (MakeCollectionableResource) parent;
-				if (!handlerHelper.checkAuthorisation(manager, mkcol, request)) {
-					throw new NotAuthorizedException(mkcol);
-				}
-				log.info("autocreating new folder: " + path.getName());
-				CollectionResource newCol = mkcol.createCollection(path.getName());
-				manager.getEventManager().fireEvent(new NewFolderEvent(newCol));
-				return newCol;
-			} else {
+			if (!(parent instanceof MakeCollectionableResource)) {
 				log.info("parent folder isnt a MakeCollectionableResource: " + parent.getName() + " - " + parent.getClass());
 				return null;
 			}
-		} else if (r instanceof CollectionResource) {
+
+			MakeCollectionableResource mkcol = (MakeCollectionableResource) parent;
+			if (!handlerHelper.checkAuthorisation(manager, mkcol, request)) {
+				throw new NotAuthorizedException(mkcol);
+			}
+			log.info("autocreating new folder: " + path.getName());
+			try {
+				CollectionResource newCol = mkcol.createCollection(path.getName());
+				manager.getEventManager().fireEvent(new NewFolderEvent(newCol));
+				return newCol;
+			} catch (BadRequestException e) {
+				// A BedRequestException could occur from a race between two
+				// PUT requests targeting the same non-existing collection.  If
+				// both request see the collection as missing, both will attempt
+				// to create it.  The request that loses the race will see
+				// a BadRequestException.  Therefore we simply retry the child
+				// request if this happens.
+				log.info("child spontaneously appeared, retrying find child: {} in parent: {} - {}",
+						parent.getClass(), path.getName(), parent.getName(), parent.getClass());
+				r = parent.child(path.getName());
+			}
+		}
+
+		if (r instanceof CollectionResource) {
 			return (CollectionResource) r;
 		} else {
 			log.info("parent in URL is not a collection: " + r.getName());
